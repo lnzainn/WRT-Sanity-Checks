@@ -1,9 +1,9 @@
 import pandas as pd
 from datetime import date
 
-scrambles = pd.read_csv('WCA_export344_20251210T004812Z.tsv/WCA_export_Scrambles.tsv', sep = '\t')
-results = pd.read_csv('WCA_export344_20251210T004812Z.tsv/WCA_export_Results.tsv', sep = '\t')
-comps = pd.read_csv('WCA_export344_20251210T004812Z.tsv/WCA_export_Competitions.tsv', sep = '\t')
+scrambles = pd.read_csv('WCA_export_v2_350_20251216T004759Z.tsv/WCA_export_Scrambles.tsv', sep = '\t')
+results = pd.read_csv('WCA_export_v2_350_20251216T004759Z.tsv/WCA_export_Results.tsv', sep = '\t')
+comps = pd.read_csv('WCA_export_v2_350_20251216T004759Z.tsv/WCA_export_Competitions.tsv', sep = '\t')
 
 
 comps['end_date'] = pd.to_datetime(
@@ -87,40 +87,53 @@ max_attempts_per_comp = (
 )
 
 
-mbf_scrambles['scramble_count'] = mbf_scrambles['scramble'].apply(mbf_scrambles_count)
+mbf_scrambles = recent_scrambles[recent_scrambles['eventId'] == '333mbf'].copy()
 
 scramble_counts = (
     mbf_scrambles
-    .merge(
-        max_attempts_per_comp[['competitionId', 'attempt_num']],
-        left_on=['competitionId', 'scrambleNum'],
-        right_on=['competitionId', 'attempt_num'],
-        how='inner'
-    )
-    .groupby(['competitionId', 'groupId'], as_index=False)['scramble_count']
+    .assign(scramble_count=mbf_scrambles['scramble'].apply(mbf_scrambles_count))
+    .groupby(['competitionId', 'scrambleNum', 'groupId'], as_index=False)['scramble_count']
     .sum()
 )
 
-
 comparison = scramble_counts.merge(
-    max_attempts_per_comp,
-    on='competitionId',
+    max_attempts_per_comp[['competitionId', 'attempt_num', 'attempted']],
+    left_on=['competitionId', 'scrambleNum'],
+    right_on=['competitionId', 'attempt_num'],
     how='inner'
 )
 
+comparison['diff'] = comparison['scramble_count'] - comparison['attempted']
+comparison['abs_diff'] = comparison['diff'].abs()
 
-comparison['relation'] = comparison.apply(
-    lambda r: (
+def pick_best_group(df):
+    exact = df[df['diff'] == 0]
+
+    if not exact.empty:
+        row = exact.iloc[0]
+        row['relation'] = 'equal'
+        row['used_closest'] = False
+        return row
+
+
+    closest = df.loc[df['abs_diff'].idxmin()].copy()
+
+    closest['relation'] = (
         'more scrambles than cubes attempted'
-        if r['scramble_count'] > r['attempted']
+        if closest['diff'] > 0
         else 'less scrambles than cubes attempted'
-        if r['scramble_count'] < r['attempted']
-        else 'equal'
-    ),
-    axis=1
+    )
+    closest['used_closest'] = True
+
+    return closest
+
+final_cases = (
+    comparison
+    .groupby('competitionId', as_index=False)
+    .apply(pick_best_group)
+    .reset_index(drop=True)
 )
 
-final_cases = comparison[comparison['relation'] != 'equal']
 
 
 group_counts = (
@@ -136,21 +149,13 @@ final_cases = final_cases.merge(
     how='left'
 )
 
-final_cases['notes'] = final_cases['group_count'].apply(
-    lambda x: 'Competition had multiple scramble groups' if x > 1 else ''
+final_cases['notes'] = final_cases.apply(
+    lambda r: (
+        'Exact match found'
+        if not r['used_closest']
+        else f"Closest match used (difference = {r['diff']})"
+    ) + ('; multiple scramble groups' if r['group_count'] > 1 else ''),
+    axis=1
 )
 
-final_cases = final_cases.drop(columns='group_count')
-
-
-final_cases[
-    [
-        'competitionId',
-        'groupId',
-        'personName',
-        'attempted',
-        'scramble_count',
-        'relation', 
-        'notes'
-    ]
-].to_csv('Check.csv', sep = ',')
+final_cases = final_cases.drop(columns=['group_count', 'abs_diff', 'used_closest']).to_csv('Check.csv', sep = ',')
