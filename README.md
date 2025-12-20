@@ -5,4 +5,4 @@ This repository contains code that will do the following:
 - Detect cases where there are lack of MBLD scrambles
 - Detect cases where there are potentially excess scramble sets in events other than MBLD (pending)
 - Look for anomalies in results including but not limited to suspicious fast single, worst single that is way off etc. (pending)
- 
+- Look for incorrectly entered MBLD results such as 1 min entered instead of 1 hour (pending)
